@@ -1,5 +1,16 @@
 from copy import copy
 
+import torch
+
+# common accross all trials
+GAMMA = 0.99
+OPTIMIZER = torch.optim.RMSprop
+LEARNING_RATE = 0.005
+
+# important constants for this trial only
+CHAIN_LEN = 100
+
+
 class RandomChain():
 
 	def __init__(self, length):
@@ -42,4 +53,14 @@ class RandomChain():
 			print('action not valid: '+str(action))
 
 		return (copy(self.state), reward, done)
+
+# turns the state of a chain env into a one-hot tensor that can be fed into a neural net
+def one_hot_chain_env(state):
+	t = torch.zeros(CHAIN_LEN+1)
+	t[state] = 1.0
+	return t
+
+env = RandomChain(5)
+
+
 
