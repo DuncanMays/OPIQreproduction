@@ -1,8 +1,3 @@
-# we want replay memory to be a transpose of transitions, if batch = replay_memory.sample(), then batch[0] should be an array of starting states
-# we also want columns in replay memory to be either tensors or arrays, since we've gotta add and multiply them and it would be nice to do this in parallel
-# this is a problem for terminal states, we want to use a different bellman update equation for them and so we'll need some kind of filter
-# we may in need to iterate over the batch columns and set reward to itself plus the future q value if not done, this will be a serial operation, unless we maybe compile it with torch's jit?
-
 import gym
 from collections import deque
 import random
@@ -20,8 +15,9 @@ BATCH_SIZE = 32
 NUM_EPISODES = 300
 GAMMA = 0.99
 EPS_START = 0.3
-EPS_BOTTOM = 0.05
-DECAY_RATE = 0.99
+EPS_BOTTOM = 0.02
+DECAY_RATE = 0.95
+UPDATE_INTERVAL = 20
 
 # the neural net used to approximate q values
 class CartpoleQnetwork(torch.nn.Module):
@@ -31,16 +27,14 @@ class CartpoleQnetwork(torch.nn.Module):
 
 		self.linear1 = torch.nn.Linear(4, 64)
 		self.linear2 = torch.nn.Linear(64, 64)
-		self.linear3 = torch.nn.Linear(64, 64)
-		self.linear4 = torch.nn.Linear(64, 2)
+		self.linear3 = torch.nn.Linear(64, 2)
 
 		self.activation = torch.relu
 
 	def forward(self, x):
 		x = self.activation(self.linear1(x))
 		x = self.activation(self.linear2(x))
-		x = self.activation(self.linear3(x))
-		x = self.linear4(x)
+		x = self.linear3(x)
 
 		return x
 
@@ -55,9 +49,12 @@ class DeepQAgent():
 		# initializing the neural net used for policy and bootstrapping, we will never train this model, but we will update its parameters with params from the other model
 		self.model = CartpoleQnetwork()
 
+		# this is the model that will be trained on the replay memory. We will use the main model for bootstrapping, however
+		self.target_model = CartpoleQnetwork()
+
 		# self.criterion = torch.nn.SmoothL1Loss(0.2)
 		self.criterion = torch.nn.MSELoss()
-		self.optimizer = torch.optim.Adam(lr=0.001, params=self.model.parameters())
+		self.optimizer = torch.optim.Adam(lr=0.001, params=self.target_model.parameters())
 
 	def get_action(self, observation):
 		# converts the observation into a tensor that the neural net can operate on
@@ -91,7 +88,8 @@ class DeepQAgent():
 		state_is_terminal_tensor = torch.Tensor(state_is_terminal)
 
 		# gets the model's evaluations of the state, given the information available in the observation
-		q_values = self.model(observations)
+		# note how we're using the target model, since that is the model we're training to match the observed q distribution
+		q_values = self.target_model(observations)
 
 		# this is the estimated "value" of the next state. That is, it is the model's estimated Q value for the optimal action 
 		q_values_next = self.model(next_observations)
@@ -125,6 +123,12 @@ class DeepQAgent():
 	def update_replay_memory(self, transition):
 		self.replay_memory.append(transition)
 
+	def update_model(self):
+		main_params = list(self.model.parameters())
+		target_params = list(self.target_model.parameters())
+		for i in range(len(main_params)):
+		   main_params[i].data = target_params[i].data
+
 agent = DeepQAgent()
 
 episode_lengths = []
@@ -148,6 +152,8 @@ for i in range(NUM_EPISODES):
 	if (eps > EPS_BOTTOM):
 		eps = eps*DECAY_RATE
 
+	if (i%UPDATE_INTERVAL == 0):
+		agent.update_model()
 
 	while not done:
 
@@ -185,12 +191,12 @@ for i in range(NUM_EPISODES):
 
 
 # saves model parameters
-print('saving model params to disk')
-params_list = list(agent.model.parameters())
-byte_strm = pickle.dumps(params_list)
-f = open(time.asctime(), 'wb')
-f.write(byte_strm)
-f.close()
+# print('saving model params to disk')
+# params_list = list(agent.model.parameters())
+# byte_strm = pickle.dumps(params_list)
+# f = open(time.asctime(), 'wb')
+# f.write(byte_strm)
+# f.close()
 
 x = [i for i in range(len(episode_lengths))]
 plt.plot(x, episode_lengths)
