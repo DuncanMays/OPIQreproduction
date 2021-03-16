@@ -4,11 +4,13 @@ import random
 from matplotlib import pyplot as plt
 import time
 import pickle
+import numpy as np
 
 import torch
 
 env = gym.make('CartPole-v0')
 
+# deep Q hyper-params
 REPLAY_MEMORY_SIZE = 1_000
 MIN_REPLAY_MEMORY_SIZE = 100
 BATCH_SIZE = 32
@@ -18,6 +20,12 @@ EPS_START = 0.3
 EPS_BOTTOM = 0.02
 DECAY_RATE = 0.95
 UPDATE_INTERVAL = 20
+
+# OPIQ hyper-params
+M = 0.5
+C_action = 1
+C_bootstrap = 1
+HASH_SIZE = 32
 
 # the neural net used to approximate q values
 class CartpoleQnetwork(torch.nn.Module):
@@ -38,9 +46,25 @@ class CartpoleQnetwork(torch.nn.Module):
 
 		return x
 
+def get_static_hash(in_dim, out_dim):
+
+	A = torch.normal(mean = torch.zeros(out_dim, in_dim))
+
+	def hash_fn(observation, action):
+		observation = torch.tensor(observation)
+		action = torch.tensor(action)
+		observation_flat = torch.reshape(observation, [torch.numel(observation)])
+		action_flat = torch.reshape(action, [torch.numel(action)])
+		flat = torch.cat([observation_flat, action_flat], axis=0)
+		dot_prod = A*flat
+		sign = torch.sign(dot_prod)
+		return hash(str(sign.tolist()))
+
+	return hash_fn
+
 # this implementation of deep q learning is highly specialized and integrated with this program and the environment it uses
 # it cannot be used in general cases, or even exist in a separate file, because it makes many references to local variables
-class DeepQAgent():
+class OPIQ_Agent():
 
 	def __init__(self):
 		# initializing replay memory
@@ -56,12 +80,49 @@ class DeepQAgent():
 		self.criterion = torch.nn.MSELoss()
 		self.optimizer = torch.optim.Adam(lr=0.001, params=self.target_model.parameters())
 
+		# this function will hash state/action pairs
+		# self.hash_fn = get_static_hash(env.action_space.n + env.observation_space.shape[0], HASH_SIZE)
+		self.hash_fn = get_static_hash(5, HASH_SIZE)
+		# this dict will hold the number of times each state/action has been visited, with the hashes as keys
+		self.novelty_dict = {}
+		# this param controls the rate of descent of the novelty score wrt the number of visits to each state, higher means novelty decays faster, lower means novelty decays slower
+		self.novelty_decay = M
+
 	def get_action(self, observation):
 		# converts the observation into a tensor that the neural net can operate on
 		obs = torch.tensor(observation, dtype=torch.float32).unsqueeze(dim=0)
-		# gets the argmax of the model's output on obs and then converts it into an integer corersponding to a certain action
-		return torch.argmax(self.model(obs), dim=1)[0].item()
-	
+		# gets the predicted q values as given by the neural net, and 
+		q_vals = self.model(obs)
+		# gets the novelty score of eacha action
+		novelty = self.novelty_tensor(observation)
+		# selects the action as the maximum of a weighted combination of the action's q value and novelty
+		action = torch.argmax(q_vals + C_action*novelty, dim=1)[0].item()
+		# we now update the novelty table to reflect the current action selection
+		self.visited(observation, action)
+
+		return action
+
+	def get_num_visits(self, state, action):
+		n = None
+		try:
+			n = self.novelty_dict[self.hash_fn(state, action)]
+		except(KeyError):
+			n = 0
+			self.novelty_dict[self.hash_fn(state, action)] = 0
+		return n
+
+	def novelty_score(self, state, action):
+		n = self.get_num_visits(state, action)
+		return 1/((n+1)**self.novelty_decay)
+
+	# calculates the novelty scores of all actions in a state, and returns it as a tensor.
+	# does not multiply by C factor, as that is left for the caller
+	def novelty_tensor(self, state):
+		scores = []
+		for action in range(env.action_space.n):
+			scores.append(self.novelty_score(state, action))
+		return torch.tensor(scores)
+		
 
 	def train_from_replay(self):
 		# checks that the replay buffer is full enough before we start sampling from it, else the agent will focus too much on a small set of transitions
@@ -129,7 +190,14 @@ class DeepQAgent():
 		for i in range(len(main_params)):
 		   main_params[i].data = target_params[i].data
 
-agent = DeepQAgent()
+	# counts the number of visits to each state
+	def visited(self, state, action):
+		try:
+			self.novelty_dict[self.hash_fn(state, action)] += 1
+		except(KeyError):
+			self.novelty_dict[self.hash_fn(state, action)] = 1
+
+agent = OPIQ_Agent()
 
 episode_lengths = []
 
@@ -175,6 +243,10 @@ for i in range(NUM_EPISODES):
 		# saves the transition in replay memory
 		transition = (old_observation, action, reward, observation, done)
 		agent.update_replay_memory(transition)
+
+		# ********this is unique to OPIQ
+		# this line updates the number of times the agent has visited this state/action
+		agent.visited(observation, action)
 
 		# trains the agent on a batch from replay
 		agent.train_from_replay()

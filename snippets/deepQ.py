@@ -22,7 +22,7 @@ GAMMA = 0.99
 EPS_START = 0.3
 EPS_BOTTOM = 0.02
 DECAY_RATE = 0.95
-UPDATE_INTERVAL = 20
+UPDATE_INTERVAL = 10
 
 # the neural net used to approximate q values
 class CartpoleQnetwork(torch.nn.Module):
@@ -56,6 +56,8 @@ class DeepQAgent():
 
 		# this is the model that will be trained on the replay memory. We will use the main model for bootstrapping, however
 		self.target_model = CartpoleQnetwork()
+		# we want the target model and main model to have the same parameters to begin with
+		self.update_model()
 
 		# self.criterion = torch.nn.SmoothL1Loss(0.2)
 		self.criterion = torch.nn.MSELoss()
@@ -66,7 +68,6 @@ class DeepQAgent():
 		obs = torch.tensor(observation, dtype=torch.float32).unsqueeze(dim=0)
 		# gets the argmax of the model's output on obs and then converts it into an integer corersponding to a certain action
 		return torch.argmax(self.model(obs), dim=1)[0].item()
-	
 
 	def train_from_replay(self):
 		# checks that the replay buffer is full enough before we start sampling from it, else the agent will focus too much on a small set of transitions
@@ -105,7 +106,7 @@ class DeepQAgent():
 		#  adjusted to bring it's estimates close to this figure, and to bring this figure closer to its estimates, and so it wouldn't 
 		#  learn anything
 		true_q_values = q_values.clone().detach()
-		# range(len(true_q_values)) selects all q vectors in the transition set
+		# range(len(true_q_values)) selects all q vectors in the batch
 		# actions selects the q value for the specific action that was taken
 		true_q_values[range(len(true_q_values)), actions] = rewards + GAMMA*torch.max(q_values_next, axis=1).values
 
@@ -132,7 +133,7 @@ class DeepQAgent():
 		main_params = list(self.model.parameters())
 		target_params = list(self.target_model.parameters())
 		for i in range(len(main_params)):
-		   main_params[i].data = target_params[i].data
+		   main_params[i].data = target_params[i].clone().data
 
 agent = DeepQAgent()
 
