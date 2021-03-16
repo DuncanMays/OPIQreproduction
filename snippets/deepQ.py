@@ -22,7 +22,7 @@ GAMMA = 0.99
 EPS_START = 0.3
 EPS_BOTTOM = 0.02
 DECAY_RATE = 0.95
-UPDATE_INTERVAL = 10
+UPDATE_INTERVAL = 5
 
 # the neural net used to approximate q values
 class CartpoleQnetwork(torch.nn.Module):
@@ -133,7 +133,7 @@ class DeepQAgent():
 		main_params = list(self.model.parameters())
 		target_params = list(self.target_model.parameters())
 		for i in range(len(main_params)):
-		   main_params[i].data = target_params[i].clone().data
+			main_params[i].data = target_params[i].clone().data
 
 agent = DeepQAgent()
 

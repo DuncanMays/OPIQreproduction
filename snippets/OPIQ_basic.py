@@ -19,7 +19,7 @@ GAMMA = 0.99
 EPS_START = 0.3
 EPS_BOTTOM = 0.02
 DECAY_RATE = 0.95
-UPDATE_INTERVAL = 20
+UPDATE_INTERVAL = 5
 
 # OPIQ hyper-params
 M = 0.5
@@ -172,6 +172,9 @@ class OPIQ_Agent():
 		# then by setting the target q values for each prediction to only the reward, ignoring the value of the state that follows it
 		true_q_values[terminal_indices, actions_tensor[terminal_indices].tolist()] = rewards[terminal_indices]
 
+		# we now adjust the q values with the novelty score, this is a crucial part of OPIQ and is unique to it
+		true_q_values = true_q_values + C_bootstrap*torch.stack([self.novelty_tensor(observation) for observation in observations])
+
 		loss = self.criterion(q_values, true_q_values)
 
 		# clears the gradients of the network's parameters in preparation for the following update
@@ -188,7 +191,7 @@ class OPIQ_Agent():
 		main_params = list(self.model.parameters())
 		target_params = list(self.target_model.parameters())
 		for i in range(len(main_params)):
-		   main_params[i].data = target_params[i].data
+			main_params[i].data = target_params[i].clone().data
 
 	# counts the number of visits to each state
 	def visited(self, state, action):
