@@ -1,73 +1,94 @@
-# we want replay memory to be a transpose of transitions, if batch = replay_memory.sample(), then batch[0] should be an array of starting states
-# we also want columns in replay memory to be either tensors or arrays, since we've gotta add and multiply them and it would be nice to do this in parallel
-# this is a problem for terminal states, we want to use a different bellman update equation for them and so we'll need some kind of filter
-# we may in need to iterate over the batch columns and set reward to itself plus the future q value if not done, this will be a serial operation, unless we maybe compile it with torch's jit?
-
-import gym
 from collections import deque
 import random
-from matplotlib import pyplot as plt
-import time
-import pickle
+import numpy as np
 
 import torch
 
-env = gym.make('CartPole-v0')
-
+# deep Q hyper-params
 REPLAY_MEMORY_SIZE = 1_000
 MIN_REPLAY_MEMORY_SIZE = 100
 BATCH_SIZE = 32
-NUM_EPISODES = 300
 GAMMA = 0.99
-EPS_START = 0.3
-EPS_BOTTOM = 0.02
-DECAY_RATE = 0.95
-UPDATE_INTERVAL = 5
 
-# the neural net used to approximate q values
-class CartpoleQnetwork(torch.nn.Module):
-
-	def __init__(self):
-		super(CartpoleQnetwork, self).__init__()
-
-		self.linear1 = torch.nn.Linear(4, 64)
-		self.linear2 = torch.nn.Linear(64, 64)
-		self.linear3 = torch.nn.Linear(64, 2)
-
-		self.activation = torch.relu
-
-	def forward(self, x):
-		x = self.activation(self.linear1(x))
-		x = self.activation(self.linear2(x))
-		x = self.linear3(x)
-
-		return x
+# OPIQ hyper-params
+M = 0.5
+C_action = 1
+C_bootstrap = 1
+HASH_SIZE = 32
 
 # this implementation of deep q learning is highly specialized and integrated with this program and the environment it uses
 # it cannot be used in general cases, or even exist in a separate file, because it makes many references to local variables
-class DeepQAgent():
+class OPIQ_Agent():
 
-	def __init__(self):
+	def __init__(self, neural_architecture, observation_dim, action_dim):
 		# initializing replay memory
 		self.replay_memory = deque(maxlen=REPLAY_MEMORY_SIZE)
 
 		# initializing the neural net used for policy and bootstrapping, we will never train this model, but we will update its parameters with params from the other model
-		self.model = CartpoleQnetwork()
+		self.model = neural_architecture(observation_dim, action_dim)
 
 		# this is the model that will be trained on the replay memory. We will use the main model for bootstrapping, however
-		self.target_model = CartpoleQnetwork()
-		# we want the target model and main model to have the same parameters to begin with
-		self.update_model()
+		self.target_model = neural_architecture(observation_dim, action_dim)
 
 		# self.criterion = torch.nn.SmoothL1Loss(0.2)
 		self.criterion = torch.nn.MSELoss()
 		self.optimizer = torch.optim.Adam(lr=0.001, params=self.target_model.parameters())
 
+		# this matrix will be used to hash state/action pairs
+		self.A = torch.normal(mean = torch.zeros(32, 5))
+		# this dict will hold the number of times each state/action has been visited, with the hashes as keys
+		self.novelty_dict = {}
+		# this param controls the rate of descent of the novelty score wrt the number of visits to each state, higher means novelty decays faster, lower means novelty decays slower
+		self.novelty_decay = M
+
+		self.observation_dim = observation_dim
+		self.action_dim = action_dim
+
 	def get_action(self, observation):
 		# converts the observation into a tensor that the neural net can operate on
 		obs = torch.tensor(observation, dtype=torch.float32).unsqueeze(dim=0)
-		# gets the argmax of the model's output on obs and then converts it into an integer corersponding to a certain action
-		return torch.argmax(self.model(obs), dim=1)[0].item()
+		# gets the predicted q values as given by the neural net, and 
+		q_vals = self.model(obs)
+		# gets the novelty score of eacha action
+		novelty = self.novelty_tensor(observation)
+		# selects the action as the maximum of a weighted combination of the action's q value and novelty
+		action = torch.argmax(q_vals + C_action*novelty, dim=1)[0].item()
+		# we now update the novelty table to reflect the current action selection
+		self.visited(observation, action)
+
+		return action
+
+	def get_num_visits(self, state, action):
+		n = None
+		try:
+			n = self.novelty_dict[self.hash_fn(state, action)]
+		except(KeyError):
+			n = 0
+			self.novelty_dict[self.hash_fn(state, action)] = 0
+		return n
+
+	def hash_fn(self, observation, action):
+		observation = torch.tensor(observation)
+		action = torch.tensor(action)
+		observation_flat = torch.reshape(observation, [torch.numel(observation)])
+		action_flat = torch.reshape(action, [torch.numel(action)])
+		flat = torch.cat([observation_flat, action_flat], axis=0)
+		dot_prod = self.A*flat
+		sign = torch.sign(dot_prod)
+		return hash(str(sign.tolist()))
+
+	def novelty_score(self, state, action):
+		n = self.get_num_visits(state, action)
+		return 1/((n+1)**self.novelty_decay)
+
+	# calculates the novelty scores of all actions in a state, and returns it as a tensor.
+	# does not multiply by C factor, as that is left for the caller
+	def novelty_tensor(self, state):
+		scores = []
+		for action in range(self.action_dim):
+			scores.append(self.novelty_score(state, action))
+		return torch.tensor(scores)
+		
 
 	def train_from_replay(self):
 		# checks that the replay buffer is full enough before we start sampling from it, else the agent will focus too much on a small set of transitions
@@ -106,7 +127,7 @@ class DeepQAgent():
 		#  adjusted to bring it's estimates close to this figure, and to bring this figure closer to its estimates, and so it wouldn't 
 		#  learn anything
 		true_q_values = q_values.clone().detach()
-		# range(len(true_q_values)) selects all q vectors in the batch
+		# range(len(true_q_values)) selects all q vectors in the transition set
 		# actions selects the q value for the specific action that was taken
 		true_q_values[range(len(true_q_values)), actions] = rewards + GAMMA*torch.max(q_values_next, axis=1).values
 
@@ -116,6 +137,10 @@ class DeepQAgent():
 
 		# then by setting the target q values for each prediction to only the reward, ignoring the value of the state that follows it
 		true_q_values[terminal_indices, actions_tensor[terminal_indices].tolist()] = rewards[terminal_indices]
+
+		# we now adjust the q values with the novelty score, this is a crucial part of OPIQ and is unique to it
+		future_novelty = torch.stack([self.novelty_tensor(observation) for observation in observations])
+		true_q_values = true_q_values + C_bootstrap*future_novelty
 
 		loss = self.criterion(q_values, true_q_values)
 
@@ -135,75 +160,15 @@ class DeepQAgent():
 		for i in range(len(main_params)):
 			main_params[i].data = target_params[i].clone().data
 
-agent = DeepQAgent()
+	# counts the number of visits to each state
+	def visited(self, state, action):
+		try:
+			self.novelty_dict[self.hash_fn(state, action)] += 1
+		except(KeyError):
+			self.novelty_dict[self.hash_fn(state, action)] = 1
 
-episode_lengths = []
+# instantiates the class for testing purposes
+if(__name__ == '__main__'):
+	from neuralnets import CartpoleQnetwork
 
-eps = 0.3
-
-for i in range(NUM_EPISODES):
-	# records the start of the episode for diagnostics
-	ep_start = time.time()
-
-	# this will be set to true when an episode ends, so we've gotta reset it here
-	done = False
-
-	# the length of the episode, reset to zero
-	ep_length = 0
-
-	# observation is a 4 vector of [position of cart, velocity of cart, angle of pole, velocity of pole at tip]
-	observation = env.reset()
-	old_observation = observation
-
-	if (eps > EPS_BOTTOM):
-		eps = eps*DECAY_RATE
-
-	if (i%UPDATE_INTERVAL == 0):
-		agent.update_model()
-
-	while not done:
-
-		# env.render()
-		ep_length += 1
-
-		action = None
-		if (random.uniform(0,1) < eps):
-			action = env.action_space.sample()
-		else:
-			action = agent.get_action(observation)
-
-		# replay memory needs to know the observation that lead to the above action, so we've got to record it before we get a new observation
-		old_observation = observation
-
-		# plugs the action into state dynamics and gets a bunch of info
-		observation, reward, done, debug = env.step(action)
-
-		# saves the transition in replay memory
-		transition = (old_observation, action, reward, observation, done)
-		agent.update_replay_memory(transition)
-
-		# trains the agent on a batch from replay
-		agent.train_from_replay()
-
-		if done:
-			break
-
-	# records the end of the episode for diagnostics
-	ep_end = time.time()
-	ep_time = ep_end - ep_start
-
-	print('episode: '+str(i)+' | length: '+str(ep_length)+' | epsilon: '+str(round(100*eps, 1))+' | time(ms): '+str(round(1000*ep_time, 1)))
-	episode_lengths.append(ep_length)
-
-
-# saves model parameters
-# print('saving model params to disk')
-# params_list = list(agent.model.parameters())
-# byte_strm = pickle.dumps(params_list)
-# f = open(time.asctime(), 'wb')
-# f.write(byte_strm)
-# f.close()
-
-x = [i for i in range(len(episode_lengths))]
-plt.plot(x, episode_lengths)
-plt.show()
+	test_agent = OPIQ_Agent(CartpoleQnetwork, 5, 10)

@@ -1,0 +1,8 @@
+
+let n be the number of steps the Q agent looks forward for
+let BS be the batch size
+
+A separate data structure takes observations and strings them together into observation chains. These are lists of sequential observations, which will be used to create transitions of multiple steps. This object will accept observations from the env loop
+and will spit out observation chains when possible. It is possible to do this when n observations have been fed into the object.
+When a terminal state is reached, there will be no more observations given to the object, and so it must flush its buffer to 
+prepare for the next run of the environment. This is done by filling in 
