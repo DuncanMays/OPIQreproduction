@@ -16,7 +16,6 @@ MIN_REPLAY_MEMORY_SIZE = 100
 BATCH_SIZE = 32
 GAMMA = 0.99
 
-
 # this implementation of deep q learning is highly specialized and integrated with this program and the environment it uses
 # it cannot be used in general cases, or even exist in a separate file, because it makes many references to local variables
 class DeepQAgent():
@@ -43,7 +42,7 @@ class DeepQAgent():
 	def get_action(self, observation):
 		# converts the observation into a tensor that the neural net can operate on
 		obs = torch.tensor(observation, dtype=torch.float32).unsqueeze(dim=0)
-		# gets the argmax of the model's output on obs and then converts it into an integer corersponding to a certain action
+		# selects the action corresponding to the maximal q value
 		return torch.argmax(self.model(obs), dim=1)[0].item()
 
 	def train_from_replay(self):
@@ -70,6 +69,11 @@ class DeepQAgent():
 		rewards = torch.Tensor(rewards)
 		state_is_terminal_tensor = torch.Tensor(state_is_terminal)
 
+		# this is a robustness alteration for when we implement n-step q learning and next_observations is a list
+		if (len(next_observations.shape) > 2):
+			print('fix train from replay!')
+			next_observations = next_observations[:, 0]
+
 		# gets the model's evaluations of the state, given the information available in the observation
 		# note how we're using the target model, since that is the model we're training to match the observed q distribution
 		q_values = self.target_model(observations)
@@ -83,7 +87,7 @@ class DeepQAgent():
 		#  adjusted to bring it's estimates close to this figure, and to bring this figure closer to its estimates, and so it wouldn't 
 		#  learn anything
 		true_q_values = q_values.clone().detach()
-		# range(len(true_q_values)) selects all q vectors in the batch
+		# range(len(true_q_values)) selects all q vectors in the transition set
 		# actions selects the q value for the specific action that was taken
 		true_q_values[range(len(true_q_values)), actions] = rewards + GAMMA*torch.max(q_values_next, axis=1).values
 

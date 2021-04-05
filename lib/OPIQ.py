@@ -1,6 +1,7 @@
 from collections import deque
 import random
 import numpy as np
+from deepQ import DeepQAgent
 
 import torch
 
@@ -18,21 +19,10 @@ HASH_SIZE = 32
 
 # this implementation of deep q learning is highly specialized and integrated with this program and the environment it uses
 # it cannot be used in general cases, or even exist in a separate file, because it makes many references to local variables
-class OPIQ_Agent():
+class OPIQ_Agent(DeepQAgent):
 
 	def __init__(self, neural_architecture, observation_dim, action_dim):
-		# initializing replay memory
-		self.replay_memory = deque(maxlen=REPLAY_MEMORY_SIZE)
-
-		# initializing the neural net used for policy and bootstrapping, we will never train this model, but we will update its parameters with params from the other model
-		self.model = neural_architecture(observation_dim, action_dim)
-
-		# this is the model that will be trained on the replay memory. We will use the main model for bootstrapping, however
-		self.target_model = neural_architecture(observation_dim, action_dim)
-
-		# self.criterion = torch.nn.SmoothL1Loss(0.2)
-		self.criterion = torch.nn.MSELoss()
-		self.optimizer = torch.optim.Adam(lr=0.001, params=self.target_model.parameters())
+		super(OPIQ_Agent, self).__init__(neural_architecture, observation_dim, action_dim)
 
 		# this matrix will be used to hash state/action pairs
 		self.A = torch.normal(mean = torch.zeros(32, 5))
@@ -40,9 +30,6 @@ class OPIQ_Agent():
 		self.novelty_dict = {}
 		# this param controls the rate of descent of the novelty score wrt the number of visits to each state, higher means novelty decays faster, lower means novelty decays slower
 		self.novelty_decay = M
-
-		self.observation_dim = observation_dim
-		self.action_dim = action_dim
 
 	def get_action(self, observation):
 		# converts the observation into a tensor that the neural net can operate on
@@ -53,8 +40,6 @@ class OPIQ_Agent():
 		novelty = self.novelty_tensor(observation)
 		# selects the action as the maximum of a weighted combination of the action's q value and novelty
 		action = torch.argmax(q_vals + C_action*novelty, dim=1)[0].item()
-		# we now update the novelty table to reflect the current action selection
-		self.visited(observation, action)
 
 		return action
 
@@ -150,15 +135,6 @@ class OPIQ_Agent():
 		loss.backward()
 		# updates the parameters
 		self.optimizer.step()
-
-	def update_replay_memory(self, transition):
-		self.replay_memory.append(transition)
-
-	def update_model(self):
-		main_params = list(self.model.parameters())
-		target_params = list(self.target_model.parameters())
-		for i in range(len(main_params)):
-			main_params[i].data = target_params[i].clone().data
 
 	# counts the number of visits to each state
 	def visited(self, state, action):

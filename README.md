@@ -1,8 +1,7 @@
 # OPIQreproduction
 
 This is a repo for a reproduction of the study done for the paper Optimistic Exploration even with  Pessimistic Initialization
-https://iclr.cc/virtual_2020/poster_r1xGP6VYwH.html
-https://openreview.net/pdf?id=r1xGP6VYwH
+https://iclr.cc/virtual_2020/poster_r1xGP6VYwH.html | https://openreview.net/pdf?id=r1xGP6VYwH
 
 Here is the author's code: https://github.com/oxwhirl/opiq
 

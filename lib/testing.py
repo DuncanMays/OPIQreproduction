@@ -1,8 +1,12 @@
+# this file tests our deep q learning and OPIQ classes on the cartpole v0 env from openAI gym
+
 import gym
 import random
 from matplotlib import pyplot as plt
 import time
 import pickle
+from collections import deque
+import numpy as np
 
 from OPIQ import OPIQ_Agent
 from deepQ import DeepQAgent
@@ -14,6 +18,9 @@ EPS_START = 0.3
 EPS_BOTTOM = 0.02
 DECAY_RATE = 0.95
 
+# some class methods are unique to opiq, and so we need a boolean switch to know weather to call them or not
+testing_OPIQ = True
+
 env = gym.make('CartPole-v0')
 
 # agent = OPIQ_Agent(CartpoleQnetwork, 4, 2)
@@ -22,6 +29,36 @@ agent = DeepQAgent(CartpoleQnetwork, 4, 2)
 episode_lengths = []
 
 eps = 0.3
+
+class TransitionMemory():
+
+	def __init__(self, num_steps):
+		self.t_deque = deque(maxlen=num_steps)
+
+	def new_transition(self, new_transition):
+		# appending the new transition onto the deque
+		self.t_deque.append(new_transition)
+
+		if (len(self.t_deque) == self.t_deque.maxlen):
+			# the oldest transition in the deque
+			old_transition = self.t_deque[0]
+
+			# we're gunna return the oldest transition, but instead of the fourth element being the next observation,
+			# the fouth element will be a list of the num_steps next observations
+
+			# this is tyhe transition that will have num_steps future steps as opposed to only 1
+			extended_transition = old_transition[:3]+([],)+old_transition[4:]
+
+			for t in self.t_deque:
+				extended_transition[3].append(t[3])
+
+			return	extended_transition
+
+		else:
+			return None
+
+t_memory = TransitionMemory(10)
+
 
 for i in range(NUM_EPISODES):
 	# records the start of the episode for diagnostics
@@ -62,14 +99,22 @@ for i in range(NUM_EPISODES):
 
 		# saves the transition in replay memory
 		transition = (old_observation, action, reward, observation, done)
-		agent.update_replay_memory(transition)
+
+		# print(transition)
+		# print(t_memory.new_transition(transition)[0,3])
+
+		transition = t_memory.new_transition(transition)
+		
+		if(transition != None):
+			agent.update_replay_memory(transition)
 
 		# ********this is unique to OPIQ
 		# this line updates the number of times the agent has visited this state/action
-		try:
-			agent.visited(observation, action)
-		except(AttributeError):
-			pass
+		if (testing_OPIQ):
+			try:
+				agent.visited(observation, action)
+			except(AttributeError):
+				testing_OPIQ = False
 
 		# trains the agent on a batch from replay
 		agent.train_from_replay()
