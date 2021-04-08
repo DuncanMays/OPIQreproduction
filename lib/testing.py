@@ -13,7 +13,7 @@ from deepQ import DeepQAgent
 from neuralnets import CartpoleQnetwork
 from utils import TransitionMemory
 
-NUM_EPISODES = 300
+NUM_EPISODES = 200
 UPDATE_INTERVAL = 5
 EPS_START = 0.3
 EPS_BOTTOM = 0.02
@@ -25,7 +25,7 @@ testing_OPIQ = True
 env = gym.make('CartPole-v0')
 
 # agent = OPIQ_Agent(CartpoleQnetwork, 4, 2, num_steps=4)
-agent = DeepQAgent(CartpoleQnetwork, 4, 2, num_steps=4)
+agent = DeepQAgent(CartpoleQnetwork, 4, 2, num_steps=2)
 
 episode_lengths = []
 
