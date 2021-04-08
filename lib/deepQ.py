@@ -9,6 +9,8 @@ import random
 import time
 import pickle
 
+from utils import TransitionMemory
+
 import torch
 
 REPLAY_MEMORY_SIZE = 1_000
@@ -20,15 +22,15 @@ GAMMA = 0.99
 # it cannot be used in general cases, or even exist in a separate file, because it makes many references to local variables
 class DeepQAgent():
 
-	def __init__(self, neural_architecture, observation_dim, action_dim):
+	def __init__(self, neural_architecture, observation_dim, num_actions, num_steps=1):
 		# initializing replay memory
 		self.replay_memory = deque(maxlen=REPLAY_MEMORY_SIZE)
 
 		# initializing the neural net used for policy and bootstrapping, we will never train this model, but we will update its parameters with params from the other model
-		self.model = neural_architecture(observation_dim, action_dim)
+		self.model = neural_architecture(observation_dim, num_actions)
 
 		# this is the model that will be trained on the replay memory. We will use the main model for bootstrapping, however
-		self.target_model = neural_architecture(observation_dim, action_dim)
+		self.target_model = neural_architecture(observation_dim, num_actions)
 		# we want the target model and main model to have the same parameters to begin with
 		self.update_model()
 
@@ -37,7 +39,15 @@ class DeepQAgent():
 		self.optimizer = torch.optim.Adam(lr=0.001, params=self.target_model.parameters())
 
 		self.observation_dim = observation_dim
-		self.action_dim = action_dim
+		self.num_actions = num_actions
+
+		if (num_steps > 1):
+			# if the q-learning algorithm should take into account more than one timestep ahead, then there needs to be a transition memory
+			self.tm = TransitionMemory(num_steps)
+			self.preprocess = self.tm.new_transition
+		else:
+			# if not the preprocessing function simply wraps the transition in a list
+			self.preprocess = lambda x : [x]
 
 	def get_action(self, observation):
 		# converts the observation into a tensor that the neural net can operate on
@@ -94,7 +104,6 @@ class DeepQAgent():
 		# we now begine adjustements for terminal states
 		# firstly by finding the indices of the terminal states in the batch of transitions sampled from replay memory
 		terminal_indices = torch.stack(torch.where(state_is_terminal_tensor == 1.0)).tolist()[0]
-
 		# then by setting the target q values for each prediction to only the reward, ignoring the value of the state that follows it
 		true_q_values[terminal_indices, actions_tensor[terminal_indices].tolist()] = rewards[terminal_indices]
 
@@ -108,7 +117,8 @@ class DeepQAgent():
 		self.optimizer.step()
 
 	def update_replay_memory(self, transition):
-		self.replay_memory.append(transition)
+		transition_list = self.preprocess(transition)
+		self.replay_memory = self.replay_memory + deque(transition_list)
 
 	def update_model(self):
 		main_params = list(self.model.parameters())
