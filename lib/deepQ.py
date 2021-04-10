@@ -22,15 +22,34 @@ GAMMA = 0.99
 # it cannot be used in general cases, or even exist in a separate file, because it makes many references to local variables
 class DeepQAgent():
 
-	def __init__(self, neural_architecture, observation_dim, num_actions, num_steps=1):
+	def __init__(self, neural_architecture, observation_dim, num_actions,
+			min_replay_size = MIN_REPLAY_MEMORY_SIZE,
+			batch_size = BATCH_SIZE,
+			gamma = GAMMA,
+			train_on_gpu = False,
+			num_steps = 1):
+
+		# setting hyperparams
+		self.MIN_REPLAY_MEMORY_SIZE = min_replay_size
+		self.BATCH_SIZE = batch_size
+		self.GAMMA = gamma
+		self.TRAIN_ON_GPU = torch.cuda.is_available() and train_on_gpu
+
+		self.observation_dim = observation_dim
+		self.num_actions = num_actions
+
 		# initializing replay memory
 		self.replay_memory = deque(maxlen=REPLAY_MEMORY_SIZE)
 
 		# initializing the neural net used for policy and bootstrapping, we will never train this model, but we will update its parameters with params from the other model
 		self.model = neural_architecture(observation_dim, num_actions)
+		# this model will stay on CPU, even if we're training on GPU since we will only be evaluating with it and then it doesn't make sense to pump things through PCI
 
 		# this is the model that will be trained on the replay memory. We will use the main model for bootstrapping, however
 		self.target_model = neural_architecture(observation_dim, num_actions)
+		# moves target model to GPU if that's where we're training
+		if self.TRAIN_ON_GPU: self.target_model.to('cuda:0')
+
 		# we want the target model and main model to have the same parameters to begin with
 		self.update_model()
 
@@ -38,12 +57,9 @@ class DeepQAgent():
 		self.criterion = torch.nn.MSELoss()
 		self.optimizer = torch.optim.Adam(lr=0.001, params=self.target_model.parameters())
 
-		self.observation_dim = observation_dim
-		self.num_actions = num_actions
-
 		# this is used to disount future q values, instead of setting it every time train_from_replay runs, I'll just set it here and reuse it
-		gamma =  torch.tensor([GAMMA**(i+1) for i in range(num_steps)])
-		self.discount = gamma.repeat(BATCH_SIZE).reshape([BATCH_SIZE, num_steps])
+		gamma_powers =  torch.tensor([self.GAMMA**(i+1) for i in range(num_steps)])
+		self.discount = gamma_powers.repeat(self.BATCH_SIZE).reshape([self.BATCH_SIZE, num_steps])
 
 		if (num_steps > 1):
 			# if the q-learning algorithm should take into account more than one timestep ahead, then there needs to be a transition memory
@@ -52,7 +68,7 @@ class DeepQAgent():
 		else:
 			self.preprocess = self.default_preprocess
 
-		# this will be used to mask off values from states after the env terminates
+		# this will be used to create masks to remove values from states after the env terminates
 		self.mask_components = get_mask_components(num_steps)
 
 	# this is the default preprocessing function for new transitions
@@ -68,17 +84,19 @@ class DeepQAgent():
 	def get_action(self, observation):
 		# converts the observation into a tensor that the neural net can operate on
 		obs = torch.tensor(observation, dtype=torch.float32).unsqueeze(dim=0)
+		# gets the q-values of the actions available, given the observation
+		q = self.model(obs)
 		# selects the action corresponding to the maximal q value
-		return torch.argmax(self.model(obs), dim=1)[0].item()
+		return torch.argmax(q, dim=1)[0].item()
 
 	def train_from_replay(self):
 		# checks that the replay buffer is full enough before we start sampling from it, else the agent will focus too much on a small set of transitions
-		if len(self.replay_memory) < MIN_REPLAY_MEMORY_SIZE:
+		if len(self.replay_memory) < self.MIN_REPLAY_MEMORY_SIZE:
 			return
 
 		# batch should be a list of transitions
 		# a transition is a tuple of: (observation, action, reward, next_observation, done)
-		batch = random.sample(self.replay_memory, BATCH_SIZE)
+		batch = random.sample(self.replay_memory, self.BATCH_SIZE)
 
 		# transposes the batch and then separates out all the components of each transition
 		# observations is a list that holds the agent's observation in each transition that was sampled from the replay buffer
@@ -95,13 +113,9 @@ class DeepQAgent():
 		rewards = torch.Tensor(rewards)
 		# steps_till_terminal is left as a list since we'll be using it as an index
 
-		# this is a robustness alteration for when we implement n-step q learning and next_observations is a list
-		# if (len(next_observations.shape) > 2):
-		# 	print('fix train from replay!')
-		# 	next_observations = next_observations[:, 0]
-
 		# gets the model's evaluations of the state, given the information available in the observation
 		# note how we're using the target model, since that is the model we're training to match the observed q distribution
+		if self.TRAIN_ON_GPU: observations = observations.to('cuda:0')
 		q_values = self.target_model(observations)
 
 		# this is the estimated "value" of the next states
@@ -119,6 +133,11 @@ class DeepQAgent():
 		#  adjusted to bring it's estimates close to this figure, and to bring this figure closer to its estimates, and so it wouldn't 
 		#  learn anything
 		true_q_values = q_values.clone().detach()
+
+		if self.TRAIN_ON_GPU:
+			rewards = rewards.to('cuda:0')
+			future_rewards = future_rewards.to('cuda:0')
+
 		# range(len(true_q_values)) selects all q vectors in the transition set
 		# actions selects the q value for the specific action that was taken
 		true_q_values[range(len(true_q_values)), actions] = rewards + future_rewards
@@ -140,7 +159,7 @@ class DeepQAgent():
 		main_params = list(self.model.parameters())
 		target_params = list(self.target_model.parameters())
 		for i in range(len(main_params)):
-			main_params[i].data = target_params[i].clone().data
+			main_params[i].data = target_params[i].cpu().clone().data
 
 # returns a 1D tensor of size [length] with the first n elements being one and the rest being zero
 def get_row(n, length):

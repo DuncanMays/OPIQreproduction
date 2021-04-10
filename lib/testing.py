@@ -13,19 +13,23 @@ from deepQ import DeepQAgent
 from neuralnets import CartpoleQnetwork
 from utils import TransitionMemory
 
-NUM_EPISODES = 200
+NUM_EPISODES = 250
 UPDATE_INTERVAL = 5
 EPS_START = 0.3
 EPS_BOTTOM = 0.02
 DECAY_RATE = 0.95
 
-# some class methods are unique to opiq, and so we need a boolean switch to know weather to call them or not
-testing_OPIQ = True
-
 env = gym.make('CartPole-v0')
 
+# baseline
+# agent = DeepQAgent(CartpoleQnetwork, 4, 2, num_steps=1)
+# the weird one
+agent = DeepQAgent(CartpoleQnetwork, 4, 2, batch_size=64, gamma=0.5, num_steps=3, train_on_gpu=True)
+
+# OPIQ
 # agent = OPIQ_Agent(CartpoleQnetwork, 4, 2, num_steps=4)
-agent = DeepQAgent(CartpoleQnetwork, 4, 2, num_steps=2)
+
+
 
 episode_lengths = []
 
@@ -74,15 +78,6 @@ for i in range(NUM_EPISODES):
 		transition = (old_observation, action, reward, observation, done)
 
 		agent.update_replay_memory(transition)
-
-		# ********this is unique to OPIQ
-		# this line updates the number of times the agent has visited this state/action
-		if (testing_OPIQ):
-			try:
-				# this should be done upon the entrance of the transition to replay memory
-				agent.visited(observation, action)
-			except(AttributeError):
-				testing_OPIQ = False
 
 		# trains the agent on a batch from replay
 		agent.train_from_replay()
