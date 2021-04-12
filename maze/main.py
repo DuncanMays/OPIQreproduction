@@ -1,39 +1,44 @@
-# this file tests our deep q learning and OPIQ classes on the cartpole v0 env from openAI gym
+import torch
 
-import gym
 import random
 from matplotlib import pyplot as plt
 import time
-import pickle
-from collections import deque
 import numpy as np
+import sys
+from copy import copy
 
-from OPIQ import OPIQ_Agent
+sys.path.append('../lib')
 from deepQ import DeepQAgent
-from neuralnets import CartpoleQnetwork
+from neuralnets import MazeNetwork
 
+from maze import SnakingMaze
+
+# important constants for this trial only
+MAZE_SIZE = 8
 NUM_EPISODES = 250
 UPDATE_INTERVAL = 5
 EPS_START = 0.3
 EPS_BOTTOM = 0.02
 DECAY_RATE = 0.95
 
-env = gym.make('CartPole-v0')
+env = SnakingMaze(MAZE_SIZE)
 
 # baseline
-# agent = DeepQAgent(CartpoleQnetwork, 4, 2, num_steps=1)
+agent = DeepQAgent(MazeNetwork, (10*env.size, 10*env.size, 1), 4)
 # the weird one
-agent = DeepQAgent(CartpoleQnetwork, 4, 2, batch_size=64, gamma=0.5, num_steps=3, train_on_gpu=True)
-
-# OPIQ
-# agent = OPIQ_Agent(CartpoleQnetwork, 4, 2, num_steps=4)
+# agent = DeepQAgent(CartpoleQnetwork, 100, 2, batch_size=64, gamma=0.5, num_steps=3, train_on_gpu=True)
 
 episode_lengths = []
 
 eps = 0.3
 
 def get_random_action():
-	return env.action_space.sample()
+	return random.choice([0, 1, 2, 3])
+
+def preprocess_observations(obs):
+	observation = torch.tensor(obs)
+	return observation.permute([2, 0, 1]).tolist()
+
 
 for i in range(NUM_EPISODES):
 	# records the start of the episode for diagnostics
@@ -46,7 +51,7 @@ for i in range(NUM_EPISODES):
 	ep_length = 0
 
 	# observation is a 4 vector of [position of cart, velocity of cart, angle of pole, velocity of pole at tip]
-	observation = env.reset()
+	observation = preprocess_observations(env.reset())
 	old_observation = observation
 
 	if (eps > EPS_BOTTOM):
@@ -71,6 +76,7 @@ for i in range(NUM_EPISODES):
 
 		# plugs the action into state dynamics and gets a bunch of info
 		observation, reward, done, debug = env.step(action)
+		observation = preprocess_observations(observation)
 
 		# saves the transition in replay memory
 		transition = (old_observation, action, reward, observation, done)
@@ -91,14 +97,7 @@ for i in range(NUM_EPISODES):
 	episode_lengths.append(ep_length)
 
 
-# saves model parameters
-# print('saving model params to disk')
-# params_list = list(agent.model.parameters())
-# byte_strm = pickle.dumps(params_list)
-# f = open(time.asctime(), 'wb')
-# f.write(byte_strm)
-# f.close()
-
 x = [i for i in range(len(episode_lengths))]
 plt.plot(x, episode_lengths)
 plt.show()
+
