@@ -16,6 +16,7 @@ from env import RandomChain
 # important constants for this trial only
 CHAIN_LEN = 100
 NUM_EPISODES = 250
+NUM_TIMESTEPS = 109
 UPDATE_INTERVAL = 5
 EPS_START = 0.3
 EPS_BOTTOM = 0.02
@@ -24,9 +25,7 @@ DECAY_RATE = 0.95
 env = RandomChain(CHAIN_LEN)
 
 # baseline
-agent = DeepQAgent(CartpoleQnetwork, CHAIN_LEN, 2, num_steps=1)
-# the weird one
-# agent = DeepQAgent(CartpoleQnetwork, 100, 2, batch_size=64, gamma=0.5, num_steps=3, train_on_gpu=True)
+agent = DeepQAgent(CartpoleQnetwork, CHAIN_LEN, 2, num_steps=1, train_on_gpu=True)
 
 episode_lengths = []
 
@@ -88,6 +87,9 @@ for i in range(NUM_EPISODES):
 
 		# trains the agent on a batch from replay
 		agent.train_from_replay()
+
+		if (ep_length >= NUM_TIMESTEPS):
+			break
 
 		if done:
 			break

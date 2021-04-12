@@ -21,7 +21,7 @@ DECAY_RATE = 0.95
 env = gym.make('CartPole-v0')
 
 # baseline
-# agent = DeepQAgent(CartpoleQnetwork, 4, 2, num_steps=1)
+# agent = DeepQAgent(CartpoleQnetwork, 4, 2)
 # the weird one
 agent = DeepQAgent(CartpoleQnetwork, 4, 2, batch_size=64, gamma=0.5, num_steps=3, train_on_gpu=True)
 

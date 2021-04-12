@@ -33,6 +33,7 @@ class DeepQAgent():
 		self.MIN_REPLAY_MEMORY_SIZE = min_replay_size
 		self.BATCH_SIZE = batch_size
 		self.GAMMA = gamma
+		self.NUM_STEPS = num_steps
 		self.TRAIN_ON_GPU = torch.cuda.is_available() and train_on_gpu
 
 		self.observation_dim = observation_dim
@@ -58,18 +59,18 @@ class DeepQAgent():
 		self.optimizer = torch.optim.Adam(lr=0.001, params=self.target_model.parameters())
 
 		# this is used to disount future q values, instead of setting it every time train_from_replay runs, I'll just set it here and reuse it
-		gamma_powers =  torch.tensor([self.GAMMA**(i+1) for i in range(num_steps)])
-		self.discount = gamma_powers.repeat(self.BATCH_SIZE).reshape([self.BATCH_SIZE, num_steps])
+		gamma_powers =  torch.tensor([self.GAMMA**(i+1) for i in range(self.NUM_STEPS)])
+		self.discount = gamma_powers.repeat(self.BATCH_SIZE).reshape([self.BATCH_SIZE, self.NUM_STEPS])
 
-		if (num_steps > 1):
+		if (self.NUM_STEPS > 1):
 			# if the q-learning algorithm should take into account more than one timestep ahead, then there needs to be a transition memory
-			self.tm = TransitionMemory(num_steps)
+			self.tm = TransitionMemory(self.NUM_STEPS)
 			self.preprocess = self.tm.new_transition
 		else:
 			self.preprocess = self.default_preprocess
 
 		# this will be used to create masks to remove values from states after the env terminates
-		self.mask_components = get_mask_components(num_steps)
+		self.mask_components = get_mask_components(self.NUM_STEPS)
 
 	# this is the default preprocessing function for new transitions
 	# it wraps the transition in a list, and changes the last element from a boolean to an integer representing the number of steps until terminal
@@ -113,6 +114,11 @@ class DeepQAgent():
 		rewards = torch.Tensor(rewards)
 		# steps_till_terminal is left as a list since we'll be using it as an index
 
+		# the first dimension of next_observations is the batch dimension, the second indexes accross NUM_STEPS timesteps
+		# to feed it into self.model, we need to reshape next_observations so that it is [BATCH_SIZE*NUM_STEPS, *sample_dimensions]
+		sample_dimensions = next_observations.shape[2:]
+		next_observations = next_observations.view(torch.Size([self.BATCH_SIZE*self.NUM_STEPS])+sample_dimensions)
+
 		# gets the model's evaluations of the state, given the information available in the observation
 		# note how we're using the target model, since that is the model we're training to match the observed q distribution
 		if self.TRAIN_ON_GPU: observations = observations.to('cuda:0')
@@ -121,7 +127,9 @@ class DeepQAgent():
 		# this is the estimated "value" of the next states
 		q_values_next = self.model(next_observations)
 		# the values of the next states, that is, the q value of the optimal action in each of them
-		values_next = torch.max(q_values_next, axis=2).values
+		values_next = torch.max(q_values_next, axis=1).values
+		# we now reshape values_next back to the original shape of next_observations
+		values_next = values_next.view([self.BATCH_SIZE, self.NUM_STEPS])
 		# this will mask off values that are past the termination of the environment
 		mask = self.mask_components[steps_till_terminal]
 		# this term represents the future rewards and will be used to calculate the true q values

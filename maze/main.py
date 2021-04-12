@@ -15,7 +15,8 @@ from maze import SnakingMaze
 
 # important constants for this trial only
 MAZE_SIZE = 8
-NUM_EPISODES = 250
+NUM_EPISODES = 1000
+NUM_TIMESTEPS = 250
 UPDATE_INTERVAL = 5
 EPS_START = 0.3
 EPS_BOTTOM = 0.02
@@ -24,7 +25,7 @@ DECAY_RATE = 0.95
 env = SnakingMaze(MAZE_SIZE)
 
 # baseline
-agent = DeepQAgent(MazeNetwork, (10*env.size, 10*env.size, 1), 4)
+agent = DeepQAgent(MazeNetwork, (10*env.size, 10*env.size, 1), 4, num_steps=3)
 # the weird one
 # agent = DeepQAgent(CartpoleQnetwork, 100, 2, batch_size=64, gamma=0.5, num_steps=3, train_on_gpu=True)
 
@@ -37,9 +38,10 @@ def get_random_action():
 
 def preprocess_observations(obs):
 	observation = torch.tensor(obs)
-	return observation.permute([2, 0, 1]).tolist()
+	observation = observation.permute([2, 0, 1])
+	return observation.tolist()
 
-
+print('starting loop')
 for i in range(NUM_EPISODES):
 	# records the start of the episode for diagnostics
 	ep_start = time.time()
@@ -50,7 +52,6 @@ for i in range(NUM_EPISODES):
 	# the length of the episode, reset to zero
 	ep_length = 0
 
-	# observation is a 4 vector of [position of cart, velocity of cart, angle of pole, velocity of pole at tip]
 	observation = preprocess_observations(env.reset())
 	old_observation = observation
 
@@ -85,6 +86,9 @@ for i in range(NUM_EPISODES):
 
 		# trains the agent on a batch from replay
 		agent.train_from_replay()
+
+		if (ep_length >= NUM_TIMESTEPS):
+			break
 
 		if done:
 			break
