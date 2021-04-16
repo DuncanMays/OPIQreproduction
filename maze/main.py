@@ -25,9 +25,7 @@ DECAY_RATE = 0.95
 env = SnakingMaze(MAZE_SIZE)
 
 # baseline
-agent = DeepQAgent(MazeNetwork, (10*env.size, 10*env.size, 1), 4, num_steps=3)
-# the weird one
-# agent = DeepQAgent(CartpoleQnetwork, 100, 2, batch_size=64, gamma=0.5, num_steps=3, train_on_gpu=True)
+agent = DeepQAgent(MazeNetwork, (10*env.size, 10*env.size, 1), 4, batch_size=64, num_steps=3, train_on_gpu=True)
 
 episode_lengths = []
 
@@ -41,7 +39,6 @@ def preprocess_observations(obs):
 	observation = observation.permute([2, 0, 1])
 	return observation.tolist()
 
-print('starting loop')
 for i in range(NUM_EPISODES):
 	# records the start of the episode for diagnostics
 	ep_start = time.time()
@@ -51,6 +48,9 @@ for i in range(NUM_EPISODES):
 
 	# the length of the episode, reset to zero
 	ep_length = 0
+
+	# the total_reward of each episode, reset to zero
+	total_reward = 0
 
 	observation = preprocess_observations(env.reset())
 	old_observation = observation
@@ -82,6 +82,8 @@ for i in range(NUM_EPISODES):
 		# saves the transition in replay memory
 		transition = (old_observation, action, reward, observation, done)
 
+		total_reward += reward
+
 		agent.update_replay_memory(transition)
 
 		# trains the agent on a batch from replay
@@ -97,7 +99,7 @@ for i in range(NUM_EPISODES):
 	ep_end = time.time()
 	ep_time = ep_end - ep_start
 
-	print('episode: '+str(i)+' | length: '+str(ep_length)+' | epsilon: '+str(round(100*eps, 1))+' | time(ms): '+str(round(1000*ep_time, 1)))
+	print('episode: '+str(i)+' | total reward: '+str(total_reward)+' | time(ms): '+str(round(1000*ep_time, 1)))
 	episode_lengths.append(ep_length)
 
 

@@ -17,12 +17,14 @@ REPLAY_MEMORY_SIZE = 1_000
 MIN_REPLAY_MEMORY_SIZE = 100
 BATCH_SIZE = 32
 GAMMA = 0.99
+GPU_NAME = 'cuda:0'
 
 # this implementation of deep q learning is highly specialized and integrated with this program and the environment it uses
 # it cannot be used in general cases, or even exist in a separate file, because it makes many references to local variables
 class DeepQAgent():
 
 	def __init__(self, neural_architecture, observation_dim, num_actions,
+			replay_size = REPLAY_MEMORY_SIZE,
 			min_replay_size = MIN_REPLAY_MEMORY_SIZE,
 			batch_size = BATCH_SIZE,
 			gamma = GAMMA,
@@ -30,6 +32,7 @@ class DeepQAgent():
 			num_steps = 1):
 
 		# setting hyperparams
+		self.REPLAY_MEMORY_SIZE = replay_size
 		self.MIN_REPLAY_MEMORY_SIZE = min_replay_size
 		self.BATCH_SIZE = batch_size
 		self.GAMMA = gamma
@@ -40,7 +43,7 @@ class DeepQAgent():
 		self.num_actions = num_actions
 
 		# initializing replay memory
-		self.replay_memory = deque(maxlen=REPLAY_MEMORY_SIZE)
+		self.replay_memory = deque(maxlen=self.REPLAY_MEMORY_SIZE)
 
 		# initializing the neural net used for policy and bootstrapping, we will never train this model, but we will update its parameters with params from the other model
 		self.model = neural_architecture(observation_dim, num_actions)
@@ -49,7 +52,7 @@ class DeepQAgent():
 		# this is the model that will be trained on the replay memory. We will use the main model for bootstrapping, however
 		self.target_model = neural_architecture(observation_dim, num_actions)
 		# moves target model to GPU if that's where we're training
-		if self.TRAIN_ON_GPU: self.target_model.to('cuda:0')
+		if self.TRAIN_ON_GPU: self.target_model.to(GPU_NAME)
 
 		# we want the target model and main model to have the same parameters to begin with
 		self.update_model()
@@ -109,10 +112,10 @@ class DeepQAgent():
 
 		# turns everything into a tensor
 		observations = torch.Tensor(observations)
-		actions_tensor = torch.Tensor(actions)
+		# actions is left as a list since we'll be using it as an index
 		next_observations = torch.Tensor(next_observations)
 		rewards = torch.Tensor(rewards)
-		# steps_till_terminal is left as a list since we'll be using it as an index
+		# steps_till_terminal is also left as a list since we'll be using it as an index
 
 		# the first dimension of next_observations is the batch dimension, the second indexes accross NUM_STEPS timesteps
 		# to feed it into self.model, we need to reshape next_observations so that it is [BATCH_SIZE*NUM_STEPS, *sample_dimensions]
@@ -121,7 +124,7 @@ class DeepQAgent():
 
 		# gets the model's evaluations of the state, given the information available in the observation
 		# note how we're using the target model, since that is the model we're training to match the observed q distribution
-		if self.TRAIN_ON_GPU: observations = observations.to('cuda:0')
+		if self.TRAIN_ON_GPU: observations = observations.to(GPU_NAME)
 		q_values = self.target_model(observations)
 
 		# this is the estimated "value" of the next states
@@ -143,8 +146,8 @@ class DeepQAgent():
 		true_q_values = q_values.clone().detach()
 
 		if self.TRAIN_ON_GPU:
-			rewards = rewards.to('cuda:0')
-			future_rewards = future_rewards.to('cuda:0')
+			rewards = rewards.to(GPU_NAME)
+			future_rewards = future_rewards.to(GPU_NAME)
 
 		# range(len(true_q_values)) selects all q vectors in the transition set
 		# actions selects the q value for the specific action that was taken

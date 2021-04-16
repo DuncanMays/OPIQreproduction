@@ -23,10 +23,13 @@ env = gym.make('CartPole-v0')
 # baseline
 # agent = DeepQAgent(CartpoleQnetwork, 4, 2)
 # the weird one
-agent = DeepQAgent(CartpoleQnetwork, 4, 2, batch_size=64, gamma=0.5, num_steps=3, train_on_gpu=True)
+# agent = DeepQAgent(CartpoleQnetwork, 4, 2, batch_size=64, gamma=0.5, num_steps=3, train_on_gpu=True)
 
 # OPIQ
-# agent = OPIQ_Agent(CartpoleQnetwork, 4, 2, num_steps=4)
+# baseline
+agent = OPIQ_Agent(CartpoleQnetwork, 4, 2)
+# the weird one
+agent = OPIQ_Agent(CartpoleQnetwork, 4, 2, batch_size=64, gamma=0.5, num_steps=3, train_on_gpu=True)
 
 episode_lengths = []
 

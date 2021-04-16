@@ -25,7 +25,7 @@ DECAY_RATE = 0.95
 env = RandomChain(CHAIN_LEN)
 
 # baseline
-agent = DeepQAgent(CartpoleQnetwork, CHAIN_LEN, 2, num_steps=1, train_on_gpu=True)
+agent = DeepQAgent(CartpoleQnetwork, CHAIN_LEN, 2, batch_size=64, num_steps=3, train_on_gpu=True)
 
 episode_lengths = []
 
