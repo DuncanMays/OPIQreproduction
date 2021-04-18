@@ -115,7 +115,8 @@ class OPIQ_Agent(DeepQAgent):
 		novelty = torch.tensor([self.novely_module(obs, torch.tensor([action])) for action in range(self.num_actions)]).unsqueeze(dim=0)
 
 		# selects the action as the maximum of a weighted combination of the action's q value and novelty
-		action = torch.argmax(q_vals + self.C_action*novelty, dim=1)[0].item()
+		score = q_vals + self.C_action*novelty
+		action = torch.argmax(score, dim=len(score.shape)-1)[0].item()
 
 		return action
 
@@ -156,7 +157,7 @@ class OPIQ_Agent(DeepQAgent):
 		# these re the q value of the next states, as estimated by our model
 		q_values_next = self.model(next_observations)
 		# the actions with maximal q value, that would be taken in those states should the agent reach them with the current model
-		next_actions = torch.max(q_values_next, axis=1).indices
+		next_actions = torch.max(q_values_next, axis=len(q_values_next.shape)-1).indices.flatten()
 		# the values of the next states, that is, the q value of the optimal action in each of them
 		values_next = q_values_next[range(self.BATCH_SIZE*self.NUM_STEPS), next_actions]
 		# we now reshape values_next back to the original shape of next_observations

@@ -91,7 +91,7 @@ class DeepQAgent():
 		# gets the q-values of the actions available, given the observation
 		q = self.model(obs)
 		# selects the action corresponding to the maximal q value
-		return torch.argmax(q, dim=1)[0].item()
+		return torch.argmax(q, dim=len(q.shape)-1).item()
 
 	def train_from_replay(self):
 		# checks that the replay buffer is full enough before we start sampling from it, else the agent will focus too much on a small set of transitions

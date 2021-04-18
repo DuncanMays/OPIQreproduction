@@ -6,6 +6,7 @@ import time
 import numpy as np
 import sys
 from copy import copy
+import json
 
 from chain_qnetwork import RandomChainNetwork
 from chain_env import RandomChain
@@ -13,71 +14,56 @@ from chain_env import RandomChain
 sys.path.append('../bin')
 from deepQ import DeepQAgent
 from OPIQ import OPIQ_Agent
+from utils import permute_generator
 
 # important constants for this trial only
 CHAIN_LEN = 100
-NUM_EPISODES = 250
+NUM_EPISODES = 150
 NUM_TIMESTEPS = 109
-UPDATE_INTERVAL = 5
-EPS_START = 0.3
-EPS_BOTTOM = 0.02
-DECAY_RATE = 0.95
+UPDATE_INTERVAL = 200
+EPSILON = 0.01
+
+time_steps_since_last_update = 0
 
 env = RandomChain(CHAIN_LEN)
 
-# baseline
-# agent = DeepQAgent(RandomChainNetwork, 100, 2)
-# the weird one
-# agent = DeepQAgent(RandomChainNetwork, 100, 2, batch_size=64, gamma=0.5, num_steps=3, train_on_gpu=True)
-
-# OPIQ
-# baseline
-agent = OPIQ_Agent(RandomChainNetwork, 100, 2)
-# the weird one
-# agent = OPIQ_Agent(RandomChainNetwork, 100, 2, batch_size=64, gamma=0.5, num_steps=3, train_on_gpu=True)
-
 episode_lengths = []
 
-eps = 0.3
 
-def get_random_action():
+def get_random_action(agent):
 	return random.choice([0, 1])
 
-# obs will 
 template = [0.0 for i in range(CHAIN_LEN)]
 def preprocess_observations(index):
 	observation = copy(template)
 	observation[index] = 1.0
-	return [observation]
+	return observation
 
-for i in range(NUM_EPISODES):
-	# records the start of the episode for diagnostics
-	ep_start = time.time()
+def run_episode(agent):
+	global time_steps_since_last_update
 
-	# this will be set to true when an episode ends, so we've gotta reset it here
 	done = False
 
-	# the length of the episode, reset to zero
 	ep_length = 0
+	total_reward = 0
+	ep_start = time.time()
 
 	# observation is a 4 vector of [position of cart, velocity of cart, angle of pole, velocity of pole at tip]
-	observation = preprocess_observations(env.reset())[0]
+	observation = preprocess_observations(env.reset())
 	old_observation = observation
 
-	if (eps > EPS_BOTTOM):
-		eps = eps*DECAY_RATE
-
-	if (i%UPDATE_INTERVAL == 0):
-		agent.update_model()
-
 	while not done:
+
+		time_steps_since_last_update += 1
+		if (time_steps_since_last_update > UPDATE_INTERVAL):
+			agent.update_model()
 
 		# env.render()
 		ep_length += 1
 
 		action = None
-		if (random.uniform(0,1) < eps):
-			action = get_random_action()
+		if (random.uniform(0,1) < EPSILON):
+			action = get_random_action(agent)
 		else:
 			action = agent.get_action(observation)
 
@@ -86,7 +72,9 @@ for i in range(NUM_EPISODES):
 
 		# plugs the action into state dynamics and gets a bunch of info
 		observation, reward, done, debug = env.step(action)
-		observation = preprocess_observations(observation)[0]
+		observation = preprocess_observations(observation)
+
+		total_reward += reward
 
 		# saves the transition in replay memory
 		transition = (old_observation, action, reward, observation, done)
@@ -96,21 +84,93 @@ for i in range(NUM_EPISODES):
 		# trains the agent on a batch from replay
 		agent.train_from_replay()
 
-		if (ep_length >= NUM_TIMESTEPS):
-			break
-
-		if done:
+		if done or (ep_length > NUM_TIMESTEPS):
 			break
 
 	# records the end of the episode for diagnostics
 	ep_end = time.time()
 	ep_time = ep_end - ep_start
 
-	print('episode: '+str(i)+' | length: '+str(ep_length)+' | epsilon: '+str(round(100*eps, 1))+' | time(ms): '+str(round(1000*ep_time, 1)))
-	episode_lengths.append(ep_length)
+	# print('total reward: '+str(total_reward)+' | episode length: '+str(ep_length)+' | time: '+str(ep_time))
+
+	return (total_reward, ep_length, ep_time)
 
 
-x = [i for i in range(len(episode_lengths))]
-plt.plot(x, episode_lengths)
-plt.show()
+def training_run(agent, n_episodes):
+	rewards = []
+	episode_lengths = []
 
+	for i in range(n_episodes):
+		# print('episode number: '+str(i)+' | ', end='')
+
+		(total_reward, ep_length, ep_time) = run_episode(agent)
+
+		rewards.append(total_reward)
+		episode_lengths.append(ep_length)
+
+	return (rewards, episode_lengths)
+
+def save_results(fname, head, rewards, episode_lengths, append=True):
+
+	f = None
+	if append:
+		f = open('./data/'+fname, 'a+')
+	else:
+		f = open('./data/'+fname, 'w+')
+
+	# writing
+	to_write = {
+		'head': head,
+		'rewards': rewards,
+		'episode_lengths': episode_lengths
+	}
+
+	f.write(json.dumps(to_write)+'\n')
+
+	f.close()
+
+def OPIQ_grid_search():
+	M_set = [0.1, 0.5, 2.0, 10.0]
+	C_action_set = [0.1, 1.0, 10.0]
+	C_bootstrap_set = [0.01, 0.1, 10.0]
+
+	# permute_generator returns a generator object that iterates over all combinations of every list in the given tuple
+	opiq_params = permute_generator((M_set, C_action_set, C_bootstrap_set))
+
+	total_combinations = len(M_set)*len(C_action_set)*len(C_bootstrap_set)
+	current_combination = 0
+
+	for (M, C_action, C_bootstrap) in opiq_params:
+
+		current_combination += 1
+		print('testing combination '+str(current_combination)+' out of '+str(total_combinations))		
+
+		agent = OPIQ_Agent(RandomChainNetwork, 100, 2, hash_size=32, m=M, ca=C_action, cb=C_bootstrap, batch_size=64, replay_size=10_000, min_replay_size=1_000, train_on_gpu=True)
+
+		(rewards, episode_lengths) = training_run(agent, NUM_EPISODES)
+
+		head = {
+			'M': M,
+			'C_action': C_action,
+			'C_bootstrap': C_bootstrap
+		}
+
+		save_results(str(current_combination)+'_OPIQ.data', head, rewards, episode_lengths)
+
+def baseline_test():
+
+	agent = DeepQAgent(RandomChainNetwork, 100, 2, batch_size=64, replay_size=10_000, min_replay_size=1_000, train_on_gpu=True)
+
+	(rewards, episode_lengths) = training_run(agent, NUM_EPISODES)
+
+	head = {}
+
+	save_results('baseline.data', head, rewards, episode_lengths)
+
+for i in range(5):
+	print('---------------------------------------------------------------------------------------')
+	print(i)
+
+	OPIQ_grid_search()
+
+# baseline_test()
