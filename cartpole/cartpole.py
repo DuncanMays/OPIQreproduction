@@ -8,58 +8,35 @@ import time
 import pickle
 from collections import deque
 import numpy as np
+import json
 
 from cartpole_qnetwork import CartpoleQnetwork
 
 sys.path.append('../bin')
 from OPIQ import OPIQ_Agent
 from deepQ import DeepQAgent
+from utils import permute_generator
 
 NUM_EPISODES = 250
 UPDATE_INTERVAL = 5
-EPS_START = 0.3
-EPS_BOTTOM = 0.02
-DECAY_RATE = 0.95
+EPSILON = 0.05
 
 env = gym.make('CartPole-v0')
 
-# baseline
-# agent = DeepQAgent(CartpoleQnetwork, 4, 2)
-# the weird one
-# agent = DeepQAgent(CartpoleQnetwork, 4, 2, batch_size=64, gamma=0.5, num_steps=3, train_on_gpu=True)
-
-# OPIQ
-# baseline
-agent = OPIQ_Agent(CartpoleQnetwork, 4, 2)
-# the weird one
-# agent = OPIQ_Agent(CartpoleQnetwork, 4, 2, batch_size=64, gamma=0.5, num_steps=3, train_on_gpu=True)
-
-episode_lengths = []
-
-eps = 0.3
-
-def get_random_action():
+def get_random_action(agent):
 	return env.action_space.sample()
 
-for i in range(NUM_EPISODES):
-	# records the start of the episode for diagnostics
-	ep_start = time.time()
+def run_episode(agent):
 
-	# this will be set to true when an episode ends, so we've gotta reset it here
 	done = False
 
-	# the length of the episode, reset to zero
 	ep_length = 0
+	total_reward = 0
+	ep_start = time.time()
 
 	# observation is a 4 vector of [position of cart, velocity of cart, angle of pole, velocity of pole at tip]
 	observation = env.reset()
 	old_observation = observation
-
-	if (eps > EPS_BOTTOM):
-		eps = eps*DECAY_RATE
-
-	if (i%UPDATE_INTERVAL == 0):
-		agent.update_model()
 
 	while not done:
 
@@ -67,8 +44,8 @@ for i in range(NUM_EPISODES):
 		ep_length += 1
 
 		action = None
-		if (random.uniform(0,1) < eps):
-			action = get_random_action()
+		if (random.uniform(0,1) < EPSILON):
+			action = get_random_action(agent)
 		else:
 			action = agent.get_action(observation)
 
@@ -77,6 +54,8 @@ for i in range(NUM_EPISODES):
 
 		# plugs the action into state dynamics and gets a bunch of info
 		observation, reward, done, debug = env.step(action)
+
+		total_reward += reward
 
 		# saves the transition in replay memory
 		transition = (old_observation, action, reward, observation, done)
@@ -93,18 +72,84 @@ for i in range(NUM_EPISODES):
 	ep_end = time.time()
 	ep_time = ep_end - ep_start
 
-	print('episode: '+str(i)+' | length: '+str(ep_length)+' | epsilon: '+str(round(100*eps, 1))+' | time(ms): '+str(round(1000*ep_time, 1)))
-	episode_lengths.append(ep_length)
+	# print('total reward: '+str(total_reward)+' | episode length: '+str(ep_length)+' | time: '+str(ep_time))
+
+	return (total_reward, ep_length, ep_time)
 
 
-# saves model parameters
-# print('saving model params to disk')
-# params_list = list(agent.model.parameters())
-# byte_strm = pickle.dumps(params_list)
-# f = open(time.asctime(), 'wb')
-# f.write(byte_strm)
-# f.close()
+def training_run(agent, n_episodes):
+	rewards = []
+	episode_lengths = []
 
-x = [i for i in range(len(episode_lengths))]
-plt.plot(x, episode_lengths)
-plt.show()
+	for i in range(n_episodes):
+		# print('episode number: '+str(i)+' | ', end='')
+
+		(total_reward, ep_length, ep_time) = run_episode(agent)
+
+		rewards.append(total_reward)
+		episode_lengths.append(ep_length)
+
+		if (i%UPDATE_INTERVAL == 0):
+			agent.update_model()
+
+	return (rewards, episode_lengths)
+
+def save_results(fname, head, rewards, episode_lengths, append=True):
+
+	f = None
+	if append:
+		f = open('./data/'+fname, 'a+')
+	else:
+		f = open('./data/'+fname, 'w+')
+
+	# writing
+	to_write = {
+		'head': head,
+		'rewards': rewards,
+		'episode_lengths': episode_lengths
+	}
+
+	f.write(json.dumps(to_write)+'\n')
+
+	f.close()
+
+def OPIQ_grid_search():
+	M_set = [0.1, 0.5, 2.0, 10.0]
+	C_action_set = [0.1, 1.0, 10.0]
+	C_bootstrap_set = [0.01, 0.1, 10.0]
+
+	# permute_generator returns a generator object that iterates over all combinations of every list in the given tuple
+	opiq_params = permute_generator((M_set, C_action_set, C_bootstrap_set))
+
+	total_combinations = len(M_set)*len(C_action_set)*len(C_bootstrap_set)
+	current_combination = 0
+
+	for (M, C_action, C_bootstrap) in opiq_params:
+
+		current_combination += 1
+		print('testing combination '+str(current_combination)+' out of '+str(total_combinations))		
+
+		agent = OPIQ_Agent(CartpoleQnetwork, 4, 2, m=M, ca=C_action, cb=C_bootstrap, train_on_gpu=True)
+
+		(rewards, episode_lengths) = training_run(agent, NUM_EPISODES)
+
+		head = {
+			'M': M,
+			'C_action': C_action,
+			'C_bootstrap': C_bootstrap
+		}
+
+		save_results(str(current_combination)+'_OPIQ.data', head, rewards, episode_lengths)
+
+def baseline_test():
+
+	agent = DeepQAgent(CartpoleQnetwork, 4, 2, train_on_gpu=True)
+
+	(rewards, episode_lengths) = training_run(agent, NUM_EPISODES)
+
+	head = {}
+
+	save_results('baseline.data', head, rewards, episode_lengths)
+
+OPIQ_grid_search()
+# baseline_test()

@@ -116,5 +116,33 @@ def test_transition_memory():
 	print('***')
 	print(flush[4][3])
 
+
+def permute_generator(tuple_of_lists):
+
+	first_list = tuple_of_lists[0]
+	last_lists = tuple_of_lists[1:]
+	
+	if (len(last_lists) != 0):
+
+		child_generator = permute_generator(last_lists)
+
+		for child in child_generator:
+			for element in first_list:
+				yield (element, *child)
+
+	else:
+		for element in first_list:
+			yield (element, )
+
+def test_permute_generator():
+
+	tol = ([1,2,3,4], ['a,', ' b'], ['one', 'two', 'three'])
+
+	gen = permute_generator(tol)
+
+	for g in gen:
+		print(g)
+
 if (__name__ == '__main__'):
-	test_transition_memory()
+	# test_transition_memory()
+	test_permute_generator()
