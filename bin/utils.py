@@ -54,13 +54,15 @@ class TransitionMemory():
 		# appending the new transition onto the deque
 		self.t_deque.append(new_transition)
 
-		if new_transition[4]:
-			# if the transition is terminal, flush memory
-			return self.flush()
-
 		if (len(self.t_deque) == self.t_deque.maxlen):
+
+			if new_transition[4]:
+				# if the transition is terminal, flush memory
+				return self.flush()
+			
 			# if we've got enough transitions in memory, return the extended form of the earliest transition
 			return [self.format(0)]
+			
 		else:
 			# if we don't have enough transitions in memory, return an empty list
 			return []

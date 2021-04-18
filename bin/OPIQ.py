@@ -52,6 +52,22 @@ class OPIQNoveltyModule(torch.nn.Module):
 
 		return novelty_score
 
+	# records a visit to a state/action
+	def add_visit(self, state, action):
+		# makes a tensor out of the state/action
+		flat = torch.cat([torch.tensor(state, dtype=torch.float32).flatten(), torch.tensor(action).unsqueeze(dim=0)], axis=0)
+		# turns it into a binary array hash
+		binary = torch.sign(torch.matmul(self.A, flat))
+		# hashes that binary array so we can use it as a key to count_dict
+		state_action_hash = hash(tuple(binary.tolist()))
+		# increments the cound of this state/action
+		self.count_dict[state_action_hash] += 1
+
+
+	# as the name suggests this resets the count dict to zero in all state/actions
+	def reset_count(self):
+		self.count_dict = defaultdict(lambda : 0)
+
 class OPIQ_Agent(DeepQAgent):
 
 	def __init__(self, neural_architecture, observation_dim, num_actions,
@@ -91,35 +107,17 @@ class OPIQ_Agent(DeepQAgent):
 	def get_action(self, observation):
 		# converts the observation into a tensor that the neural net can operate on
 		obs = torch.tensor(observation, dtype=torch.float32).unsqueeze(dim=0)
-		# creates a tensor of all avilable actions
-		actions = torch.tensor([i for i in range(self.num_actions)]).unsqueeze(dim=0)
 
 		# gets the predicted q values as given by the neural net, and 
 		q_vals = self.model(obs)
-
-		# gets the novelty score of eacha action
-		novelty = self.novely_module(obs, actions)
+		
+		# the novelty of eacha action, as predicted by OPIQ
+		novelty = torch.tensor([self.novely_module(obs, torch.tensor([action])) for action in range(self.num_actions)]).unsqueeze(dim=0)
 
 		# selects the action as the maximum of a weighted combination of the action's q value and novelty
 		action = torch.argmax(q_vals + self.C_action*novelty, dim=1)[0].item()
 
 		return action
-
-	def get_num_visits(self, state, action):
-		n = None
-		try:
-			n = self.novelty_dict[self.hash_fn(state, action)]
-		except(KeyError):
-			n = 0
-			self.novelty_dict[self.hash_fn(state, action)] = 0
-		return n
-
-	# counts the number of visits to each state
-	def visited(self, state, action):
-		try:
-			self.novelty_dict[self.hash_fn(state, action)] += 1
-		except(KeyError):
-			self.novelty_dict[self.hash_fn(state, action)] = 1
 
 	def train_from_replay(self):
 		# checks that the replay buffer is full enough before we start sampling from it, else the agent will focus too much on a small set of transitions
@@ -198,6 +196,14 @@ class OPIQ_Agent(DeepQAgent):
 		loss.backward()
 		# updates the parameters
 		self.optimizer.step()
+
+	def update_replay_memory(self, transition):
+		# records the visit to the state before putting it in replay, note that this happens before the transition is preprocessed
+		observation = transition[0]
+		action = transition[1]
+		self.novely_module.add_visit(observation, action)
+
+		super(OPIQ_Agent, self).update_replay_memory(transition)
 
 
 # instantiates the class for testing purposes

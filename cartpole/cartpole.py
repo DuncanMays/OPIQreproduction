@@ -1,6 +1,7 @@
 # this file tests our deep q learning and OPIQ classes on the cartpole v0 env from openAI gym
 
 import gym
+import sys
 import random
 from matplotlib import pyplot as plt
 import time
@@ -8,9 +9,11 @@ import pickle
 from collections import deque
 import numpy as np
 
+from cartpole_qnetwork import CartpoleQnetwork
+
+sys.path.append('../bin')
 from OPIQ import OPIQ_Agent
 from deepQ import DeepQAgent
-from neuralnets import CartpoleQnetwork
 
 NUM_EPISODES = 250
 UPDATE_INTERVAL = 5
@@ -29,7 +32,7 @@ env = gym.make('CartPole-v0')
 # baseline
 agent = OPIQ_Agent(CartpoleQnetwork, 4, 2)
 # the weird one
-agent = OPIQ_Agent(CartpoleQnetwork, 4, 2, batch_size=64, gamma=0.5, num_steps=3, train_on_gpu=True)
+# agent = OPIQ_Agent(CartpoleQnetwork, 4, 2, batch_size=64, gamma=0.5, num_steps=3, train_on_gpu=True)
 
 episode_lengths = []
 

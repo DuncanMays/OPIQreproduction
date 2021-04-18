@@ -7,37 +7,48 @@ import numpy as np
 import sys
 from copy import copy
 
-sys.path.append('../lib')
-from deepQ import DeepQAgent
-from neuralnets import MazeNetwork
+from chain_qnetwork import RandomChainNetwork
+from chain_env import RandomChain
 
-from maze import SnakingMaze
+sys.path.append('../bin')
+from deepQ import DeepQAgent
+from OPIQ import OPIQ_Agent
 
 # important constants for this trial only
-MAZE_SIZE = 8
-NUM_EPISODES = 1000
-NUM_TIMESTEPS = 250
+CHAIN_LEN = 100
+NUM_EPISODES = 250
+NUM_TIMESTEPS = 109
 UPDATE_INTERVAL = 5
 EPS_START = 0.3
 EPS_BOTTOM = 0.02
 DECAY_RATE = 0.95
 
-env = SnakingMaze(MAZE_SIZE)
+env = RandomChain(CHAIN_LEN)
 
 # baseline
-agent = DeepQAgent(MazeNetwork, (10*env.size, 10*env.size, 1), 4, batch_size=64, num_steps=3, train_on_gpu=True)
+# agent = DeepQAgent(RandomChainNetwork, 100, 2)
+# the weird one
+# agent = DeepQAgent(RandomChainNetwork, 100, 2, batch_size=64, gamma=0.5, num_steps=3, train_on_gpu=True)
+
+# OPIQ
+# baseline
+agent = OPIQ_Agent(RandomChainNetwork, 100, 2)
+# the weird one
+# agent = OPIQ_Agent(RandomChainNetwork, 100, 2, batch_size=64, gamma=0.5, num_steps=3, train_on_gpu=True)
 
 episode_lengths = []
 
 eps = 0.3
 
 def get_random_action():
-	return random.choice([0, 1, 2, 3])
+	return random.choice([0, 1])
 
-def preprocess_observations(obs):
-	observation = torch.tensor(obs)
-	observation = observation.permute([2, 0, 1])
-	return observation.tolist()
+# obs will 
+template = [0.0 for i in range(CHAIN_LEN)]
+def preprocess_observations(index):
+	observation = copy(template)
+	observation[index] = 1.0
+	return [observation]
 
 for i in range(NUM_EPISODES):
 	# records the start of the episode for diagnostics
@@ -49,10 +60,8 @@ for i in range(NUM_EPISODES):
 	# the length of the episode, reset to zero
 	ep_length = 0
 
-	# the total_reward of each episode, reset to zero
-	total_reward = 0
-
-	observation = preprocess_observations(env.reset())
+	# observation is a 4 vector of [position of cart, velocity of cart, angle of pole, velocity of pole at tip]
+	observation = preprocess_observations(env.reset())[0]
 	old_observation = observation
 
 	if (eps > EPS_BOTTOM):
@@ -77,12 +86,10 @@ for i in range(NUM_EPISODES):
 
 		# plugs the action into state dynamics and gets a bunch of info
 		observation, reward, done, debug = env.step(action)
-		observation = preprocess_observations(observation)
+		observation = preprocess_observations(observation)[0]
 
 		# saves the transition in replay memory
 		transition = (old_observation, action, reward, observation, done)
-
-		total_reward += reward
 
 		agent.update_replay_memory(transition)
 
@@ -99,7 +106,7 @@ for i in range(NUM_EPISODES):
 	ep_end = time.time()
 	ep_time = ep_end - ep_start
 
-	print('episode: '+str(i)+' | total reward: '+str(total_reward)+' | time(ms): '+str(round(1000*ep_time, 1)))
+	print('episode: '+str(i)+' | length: '+str(ep_length)+' | epsilon: '+str(round(100*eps, 1))+' | time(ms): '+str(round(1000*ep_time, 1)))
 	episode_lengths.append(ep_length)
 
 
