@@ -116,13 +116,13 @@ def save_results(fname, head, rewards, episode_lengths, append=True):
 def OPIQ_grid_search():
 	M_set = [0.1, 0.5, 2.0, 10.0]
 	C_action_set = [0.1, 1.0, 10.0]
-	C_bootstrap_set = [0.01, 0.1, 10.0]
+	C_bootstrap_set = [1.0]
 
 	# permute_generator returns a generator object that iterates over all combinations of every list in the given tuple
 	opiq_params = permute_generator((M_set, C_action_set, C_bootstrap_set))
 
 	total_combinations = len(M_set)*len(C_action_set)*len(C_bootstrap_set)
-	current_combination = 0
+	current_combination = 36
 
 	for (M, C_action, C_bootstrap) in opiq_params:
 

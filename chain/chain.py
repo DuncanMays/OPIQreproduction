@@ -105,6 +105,8 @@ def training_run(agent, n_episodes):
 
 		(total_reward, ep_length, ep_time) = run_episode(agent)
 
+		print(ep_time/ep_length)
+
 		rewards.append(total_reward)
 		episode_lengths.append(ep_length)
 
@@ -132,13 +134,13 @@ def save_results(fname, head, rewards, episode_lengths, append=True):
 def OPIQ_grid_search():
 	M_set = [0.1, 0.5, 2.0, 10.0]
 	C_action_set = [0.1, 1.0, 10.0]
-	C_bootstrap_set = [0.01, 0.1, 10.0]
+	C_bootstrap_set = [1.0]
 
 	# permute_generator returns a generator object that iterates over all combinations of every list in the given tuple
 	opiq_params = permute_generator((M_set, C_action_set, C_bootstrap_set))
 
 	total_combinations = len(M_set)*len(C_action_set)*len(C_bootstrap_set)
-	current_combination = 0
+	current_combination = 36
 
 	for (M, C_action, C_bootstrap) in opiq_params:
 
@@ -155,7 +157,8 @@ def OPIQ_grid_search():
 			'C_bootstrap': C_bootstrap
 		}
 
-		save_results(str(current_combination)+'_OPIQ.data', head, rewards, episode_lengths)
+		print('not saving results')
+		# save_results(str(current_combination)+'_OPIQ.data', head, rewards, episode_lengths)
 
 def baseline_test():
 
@@ -165,12 +168,9 @@ def baseline_test():
 
 	head = {}
 
-	save_results('baseline.data', head, rewards, episode_lengths)
+	print('not saving results')
+	# save_results('baseline.data', head, rewards, episode_lengths)
 
-for i in range(5):
-	print('---------------------------------------------------------------------------------------')
-	print(i)
-
-	OPIQ_grid_search()
+OPIQ_grid_search()
 
 # baseline_test()

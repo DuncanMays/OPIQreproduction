@@ -31,6 +31,7 @@ class OPIQNoveltyModule(torch.nn.Module):
 
 		# used to calculate hashes for state/action pseudocounts
 		self.A = torch.normal(0, 1, size=torch.Size([input_length, hash_size]))
+		self.b = torch.normal(0, 1, size=torch.Size([hash_size]))
 		self.flatten = torch.nn.Flatten()
 
 	def forward(self, states, actions):
@@ -41,7 +42,7 @@ class OPIQNoveltyModule(torch.nn.Module):
 		flat = torch.cat([states_flat, actions_flat], axis=1).T
 
 		# multiplies the long tensor containing elements from states and actions by the random matrix, and gets the sign of all elements
-		binary = torch.sign(torch.matmul(self.A, flat)).T
+		binary = torch.sign(torch.matmul(self.A, flat) + self.b).T
 
 		# I hate this line of code
 		# It is by far the slowest part of the program, since it represents many serial computations, not to mention it being overly complicated
@@ -112,7 +113,10 @@ class OPIQ_Agent(DeepQAgent):
 		q_vals = self.model(obs)
 		
 		# the novelty of eacha action, as predicted by OPIQ
-		novelty = torch.tensor([self.novely_module(obs, torch.tensor([action])) for action in range(self.num_actions)]).unsqueeze(dim=0)
+		novelty = torch.stack([self.novely_module(obs, torch.tensor([action])) for action in range(self.num_actions)])
+
+		print(novelty.shape)
+		print(q_vals.shape)
 
 		# selects the action as the maximum of a weighted combination of the action's q value and novelty
 		score = q_vals + self.C_action*novelty
